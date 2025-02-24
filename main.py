@@ -1,5 +1,6 @@
+import numpy as np
 from util import *
-import array
+import array, sys
 
 from world import World
 
@@ -7,7 +8,7 @@ class Game:
     def __init__(self):
         # Window
         self.screen = pg.display.set_mode((W,H), pg.OPENGL | pg.DOUBLEBUF)
-        pg.display.set_caption("The lil prince")
+        pg.display.set_caption("The little prince")
         pg.mouse.set_visible(0)
         self.clock = pg.time.Clock()
         self.fps = 60
@@ -23,7 +24,7 @@ class Game:
         self.set_scene(self.world)
         
     def load_shaders(self):
-        self.ctx = moderngl.create_context()
+        self.ctx = moderngl.create_context() 
         self.vert_buffer = self.ctx.buffer(data=array.array('f', [
             # vertices (center) + texture uv coords (topleft comme pygame)
             -1.0, 1.0, 0.0, 0.0,  # topleft
@@ -48,13 +49,9 @@ class Game:
         for e in pg.event.get():
             if e.type == pg.QUIT:
                 pg.quit()
-                exit()
+                sys.exit()
             scene.event(e)
         
         scene.update()
         scene.draw()
-
-        # Render
-        render(self.screen, self.scene.render, resolution=(W,H), time=pg.time.get_ticks())
-
 Game()

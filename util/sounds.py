@@ -12,7 +12,7 @@ def sound(path, vol=.5):
     sounds[path.split('.')[0]] = s
     return s
 
-select = sound("select.wav",.3)
+select = sound("select.wav",.4)
 jump = sound("jump.wav")
 switch_planet = sound("switch_planet.wav", .2)
 land = sound("land.wav")
@@ -22,3 +22,10 @@ plr_hit = sound("plr_hit.wav")
 plr_die = sound("plr_die.wav")
 shoot = sound("shoot.wav")
 boom = sound("boom.wav")
+powerup = sound("powerup.wav",.2)
+powerup_2 = sound("powerup_2.wav",.2)
+explosion = sound("explosion.wav",.4)
+done = sound("done.wav",.3)
+rocket = sound("rocket.wav",.3)
+heal = sound("heal.wav",.4)
+life = sound("life.wav",.7)

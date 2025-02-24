@@ -1,11 +1,17 @@
+from projectile import Projectile
 from prop import Prop
 from util import *
 
 RANGE = 40
+MOB_HEALTH = {
+    "slime":3,
+    "rocket":2,
+    "shooter":3,
+}
 
 class Mob(pg.sprite.Sprite):
     def __init__(self, planet, angle, type):
-        super().__init__(planet.mobs, planet.world.mobs, planet.world.objects)
+        super().__init__(planet.mobs, planet.world.mobs, planet.world.objects, planet.world.interacts)
         self.world, self.player = planet.world, planet.player
         self.imgs = planet.world.imgs[type]
         
@@ -19,18 +25,30 @@ class Mob(pg.sprite.Sprite):
         if type == 'rocket':
             self.def_move = 2 * choice((1,-1))
         
-        self.health = self.max_health = 3
-        self.attack_timer = Timer(300)
+        self.health = self.max_health = MOB_HEALTH[type]
+        self.attack_timer = Timer(300 if self.type != "shooter" else 1000)
 
-    def damage(self):
+    def damage(self,x):
         sounds.hit.play()
-        self.health -= 1
-        if self.health == 0:
+        self.health -= x
+        if self.health <= 0:
+            self.health = 0
             self.die()
-
-    def die(self):
-        sounds.die.play()
+        
+        n = randint(3, 5)
+        for i in range(n):
+            angle = int(i/n*360)
+            self.world.hit_pc.new(pos=self.pos, dir=(VECTOR*200).rotate(randint(angle-20,angle+20)), color=PARTICLE_COLORS[self.type][0],radius=randint(6,12))
+    
+    def die(self, sound=True):
+        if sound: sounds.die.play()
         self.kill()
+        self.world.player.score += 1
+        
+        n = self.max_health * 2
+        for i in range(n):
+            angle = int(i/n*360)
+            self.world.hit_pc.new(pos=self.pos, dir=(VECTOR*500).rotate(randint(angle-20,angle+20)), color=PARTICLE_COLORS[self.type][1],radius=randint(6,12))
 
     def get_status(self):
         # Action
@@ -49,16 +67,16 @@ class Mob(pg.sprite.Sprite):
         angle = self.player.angle()
 
         # Get movement
-        self.move = 0
-        if self.type == "slime" and self.planet == self.player.planet:
-            if self.player.pos.distance_to(self.pos) > RANGE:
-                self.move = (-1,1)[(self.angle + angle)%360 > 180]
+        if self.type == "slime" and self.planet == self.player.planet and self.player.pos.distance_to(self.pos) > RANGE:
+            self.move = (-1,1)[(self.angle + angle)%360 > 180]
         elif self.type == "rocket":
             self.move = self.def_move
-
+        else:
+            self.move = 0
         # Move
-        self.angle += self.move
-        self.pos = self.planet.center + VECTOR.rotate(self.angle) * self.planet.radius
+        if self.move:
+            self.angle += self.move
+            self.pos = self.planet.center + VECTOR.rotate(self.angle) * self.planet.radius
         
         # Attack
         if not self.attack_timer and self.player.pos.distance_to(self.pos) <= RANGE:
@@ -67,7 +85,18 @@ class Mob(pg.sprite.Sprite):
                 self.player.damage()
             elif self.type == "rocket":
                 self.player.damage(2)
-                self.die()
+                self.player.knockback(self.planet.vector(self).rotate(90 * int(self.def_move/abs(self.def_move))).normalize())
+                sounds.rocket.play()
+                self.die(False)
+        if not self.attack_timer and self.type == "shooter" and self.player.pos.distance_to(self.pos) <= 500:
+            self.attack_timer.activate()
+
+            vec = self.world.player.pos - self.rect.center
+            vec = vec.normalize() if vec.magnitude() else VECTOR
+            if vec.dot(self.planet.vector(self)) < 0:
+                tangent = self.planet.vector(self).normalize().rotate(90) * vec.magnitude()
+                vec = tangent*(-1,1)[vec.dot(tangent) > 0]
+            Projectile(self.world, self.rect.center, vec, self)
 
     def draw(self):
         # Values
@@ -91,5 +120,5 @@ class Mob(pg.sprite.Sprite):
         self.world.display.blit(self.image, self.rect.topleft - self.world.offset)
             
         # Health
-        h = self.world.imgs["health"][self.max_health-self.health]
+        h = self.world.imgs["health"][self.max_health-math.ceil(self.health)]
         self.world.display.blit(h, h.get_rect(center=self.rect.midtop + vec2(0,-4*SCALE) - self.world.offset))

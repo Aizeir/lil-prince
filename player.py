@@ -1,4 +1,5 @@
 from mob import Mob
+from powerup import Powerup
 from projectile import Projectile
 from prop import Prop
 from util import *
@@ -12,6 +13,7 @@ class Player(pg.sprite.Sprite):
         super().__init__(world.unplanet)
         self.world = world
         self.pos = vec2(pos)
+        self.spawn = self.pos.copy()
         self.imgs = world.imgs['player']
         
         self.planet: Planet = None
@@ -19,26 +21,48 @@ class Player(pg.sprite.Sprite):
         self.velocity = vec2()
         self.tangent = vec2()
         self.side = 'R'
+        self.rect = pg.Rect(0,0,0,0)
 
         self.inventory = {}
+        self.score = 0
+        self.powerups = {i:0 for i in range(len(POWERUP_NUM))}
 
         self.select = self.hover = None
         self.breaking = None
 
         self.health = self.max_health = 6
+        self.lives = 1
+
+        def implode_done():
+            self.notif("implode ready")
+            sounds.done.play()
 
         self.timers = {
-            "attack": Timer(150)
+            "attack": Timer(FIRE_RATE[0]),
+            "implode": Timer(IMPLODE_RELOAD[0], implode_done),
+            "notif": Timer(1000),
         }
+
+    @property
+    def dead(self): return self.health == 0
+
+    def notif(self, text):
+        self.timers["notif"].activate()
+        self.timers["notif"].text = text
 
     def angle(self):
         return self.planet.get_polar()[1] if self.ground else -1
     
     def event(self, e):
-        if e.type == pg.KEYDOWN and e.key == pg.K_LSHIFT and self.ground:
+        if self.dead: return
+        if e.type == pg.KEYDOWN and e.key == pg.K_LSHIFT and self.ground and self.powerups[6]:
             sounds.switch_planet.play()
             d,a = self.planet.get_polar()
             self.planet.set_polar(d,a+180)
+        elif e.type == pg.MOUSEBUTTONDOWN and e.button == 3 and self.powerups[7] and not self.timers["implode"]:
+            self.timers["implode"].activate()
+            self.world.implode_pc.new(self.pos.copy())
+            sounds.explosion.play()
 
         """elif e.type == pg.MOUSEBUTTONDOWN and e.button == 1 and isinstance(self.select, Mob) and not self.timers['attack']:
             self.select.damage()
@@ -65,7 +89,7 @@ class Player(pg.sprite.Sprite):
                 self.planet = planet
         # Apply gravity
         vec = -self.planet.vector().normalize()
-        self.force = self.planet.mass * vec
+        self.force = self.planet.mass * vec * GRAVITY[self.powerups[4]]
         self.velocity += self.force
         
         # Jump
@@ -107,25 +131,38 @@ class Player(pg.sprite.Sprite):
         # Prop selection
         old_select = self.select
         self.select = self.hover = None
-        for obj in self.world.objects:
+        for obj in self.world.interacts:
             if obj.rect.collidepoint(self.world.mouse_world_pos):
                 self.hover = obj
-                if obj.pos.distance_to(self.pos) <= INTERACT_RANGE:
+                if obj.pos.distance_to(self.pos) <= INTERACT_RANGE or isinstance(obj, Powerup):
                     self.select = obj
                     if obj != old_select:
                         sounds.select.play()
                 break
-    
+        
+        # Powerup
+        for powerup in self.world.powerups:
+            if powerup.rect.colliderect(self.rect):
+                powerup.take()
+                
     def shoot(self):
         if self.world.mouse[0] and not self.timers["attack"]:
             self.timers["attack"].activate()
             sounds.shoot.play()
+
             vec = self.world.mouse_world_pos - self.rect.center
             vec = vec.normalize() if vec.magnitude() else VECTOR
             if self.ground and vec.dot(self.planet.vector()) < 0:
                 tangent = self.planet.vector().normalize().rotate(90) * vec.magnitude()
                 vec = tangent*(-1,1)[vec.dot(tangent) > 0]
-            Projectile(self.world, self.rect.center, vec)
+            Projectile(self.world, self.rect.center, vec, self)
+
+            if self.powerups[0]:
+                vec = -vec
+                if self.ground and vec.dot(self.planet.vector()) < 0:
+                    tangent = self.planet.vector().normalize().rotate(90) * vec.magnitude()
+                    vec = tangent*(-1,1)[vec.dot(tangent) > 0]
+                Projectile(self.world, self.rect.center, vec, self)
 
     def damage(self, x=1):
         sounds.plr_hit.play()
@@ -133,16 +170,39 @@ class Player(pg.sprite.Sprite):
         if self.health <= 0:
             self.health = 0
             sounds.plr_die.play()
-            self.kill()
+            self.lives -= 1
             self.world.dead_timer.activate()
 
+            n = self.max_health * 3
+            for i in range(n):
+                angle = int(i/n*360)
+                type = 1
+                self.world.hit_pc.new(pos=self.pos, dir=(VECTOR*(200,500)[type]).rotate(randint(angle-20,angle+20)), color=PARTICLE_COLORS['player'][type],radius=randint(6,12))
+
+        else:
+            n = randint(3, 5)
+            for i in range(n):
+                angle = int(i/n*360)
+                type = proba(2)
+                self.world.hit_pc.new(pos=self.pos, dir=(VECTOR*(200,500)[type]).rotate(randint(angle-20,angle+20)), color=PARTICLE_COLORS['player'][type],radius=randint(6,12))
+
+    def respawn(self):
+        self.health = self.max_health
+        for t in self.timers.values():
+            t.deactivate()
+
+    def knockback(self, dir, force=20):
+        self.velocity += dir * force
+
     def update(self):
+        if self.dead: return
         self.movement()
         self.interaction()
         self.shoot()
         for t in self.timers.values(): t.update()
 
     def draw(self):
+        if self.dead: return
         # Values
         self.get_status()
         angle = int(-self.planet.vector().angle_to(VECTOR)) % 360
@@ -161,4 +221,15 @@ class Player(pg.sprite.Sprite):
 
         # Health
         h = self.world.imgs["plr_health"][self.max_health-self.health]
-        self.world.display.blit(h, h.get_rect(center=self.rect.midtop + vec2(0,-4*SCALE) - self.world.offset))
+        hr = h.get_rect(center=self.rect.midtop + vec2(0,-4*SCALE) - self.world.offset)
+        self.world.display.blit(h, hr)
+
+        # Notif
+        if self.timers["notif"]:
+            t = self.timers["notif"].text
+            t,r = textr(t, self.world.font, "white", midbottom=self.rect.midtop + vec2(0,-10*SCALE) - self.world.offset)
+            out = outline(t, 3, black)
+            x = 1 - self.timers["notif"].percent(1)**.4 * .3
+            t.set_alpha(x*255)
+            self.world.display.blit(out, out.get_rect(center=r.center))
+            self.world.display.blit(t,r)

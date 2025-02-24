@@ -1,3 +1,4 @@
+import numpy as np
 import pygame as pg, moderngl
 import os, time, sys, json
 from random import randint, shuffle, choice
@@ -98,13 +99,21 @@ def load_tileset(path, size=(16,16), scale=SCALE):
     return tilemap
 
 # Outline
-def outline(img):
+def prop_outline(img):
     surf = pg.Surface((img.get_width()+2*SCALE,img.get_height()+SCALE),pg.SRCALPHA,32).convert_alpha()
     border = pg.mask.from_surface(img).to_surface(unsetcolor=(0,0,0,0),setcolor="white")
     for dx,dy in ((-SCALE,0),(SCALE,0),(0,-SCALE)):
         surf.blit(border, (SCALE+dx,SCALE+dy))
     return surf
     
+black = (1,1,1)
+def outline(img, bd, color):
+    surf = pg.Surface((img.get_width()+2*bd,img.get_height()+2*bd),pg.SRCALPHA,32).convert_alpha()
+    border = pg.mask.from_surface(img).to_surface(unsetcolor=(0,0,0,0),setcolor=color)
+    for dx,dy in ((-bd,0),(bd,0),(0,-bd),(0,bd)):
+        surf.blit(border, (bd+dx,bd+dy))
+    return surf
+
 # Animate
 def frame_time(time, anim_speed, length=None):
     frame_idx = (pg.time.get_ticks()-time) // (1000//anim_speed)
@@ -115,7 +124,7 @@ def sides(action, anim, with_outline=False):
     if isinstance(anim, pg.Surface): anim = [anim]
     f = flips(anim)
     if with_outline:
-        return {action+'_L': [(i,outline(i)) for i in f], action+'_R': [(i,outline(i)) for i in anim]}
+        return {action+'_L': [(i,prop_outline(i)) for i in f], action+'_R': [(i,prop_outline(i)) for i in anim]}
     else:
         return {action+'_L': f, action+'_R': anim}
 
@@ -147,14 +156,12 @@ def render(tex, render, **uniforms):
     for uniform, value in uniforms.items():
         if isinstance(value, pg.Surface):
             value = texture(render.ctx, value)
-        if isinstance(value, moderngl.Texture):
+        elif isinstance(value, moderngl.Texture):
             value.use(len(textures))
             render.program[uniform] = len(textures)
             textures.append(value)
         else:
-            try:
-                render.program[uniform] = value
-            except: pass
+            render.program[uniform] = value
     render.render(mode=moderngl.TRIANGLE_STRIP)
 
     for i, t in enumerate(textures):
